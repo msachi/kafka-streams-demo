@@ -1,27 +1,99 @@
 ## Build a demo app with Kafka Streams
 
+In the following tutorial, you will write a stream processing application using Kafka Streams and then run it in your terminal with a simple Kafka producer and consumer. The application you will be building implements the WordCount algorithm, which computes a word occurrence histogram from the input text. It has the ability to operate on an infinite, unbounded stream of data.
+
 This tutorial is more or less a prettified version of the official Kafka Streams offerings found [here](https://kafka.apache.org/25/documentation/streams/quickstart) and [here](https://kafka.apache.org/25/documentation/streams/tutorial).
 
 ### 1. Setting up the project
 
-Clone this repo and then import the project in your favourite IDE.
+First, make sure that you have:
+- JDK 8 and Apache Maven 3.6 installed on your machine (check using $ java –version and $ mvn –version)
+- Kafka 2.4.1 [downloaded](https://mirrors.ukfast.co.uk/sites/ftp.apache.org/kafka/2.4.1/kafka_2.12-2.4.1.tgz) and un-tarred
 
-The `pom.xml` file included in the project already has the Streams dependency defined. Note, that the generated `pom.xml` targets Java 8, and does not work with higher Java versions.
+Then clone this repo and import the project in your favourite IDE.
 
-### 2. Piping data
+The `pom.xml` file included in the project already has the Streams dependency defined. Note that the generated `pom.xml` targets Java 8 and does not work with higher Java versions.
 
-#### 2.1 Configuring the application
+#### 2 Setting up Kafka
 
-Navigate to `myapps` and create a java file called `Pipe.java`.
+Before we start writing our application, let's set up all things Kafka.
+
+Navigate to the Kafka source on your computer and run a Zookeeper and a Kafka server:
+
+```bash
+$ bin/zookeeper-server-start.sh config/zookeeper.properties
+$ bin/kafka-server-start.sh config/server.properties
+```
+
+Next, let's create the input and the output topics that we will read from and write to:
+```bash
+$ bin/kafka-topics.sh --create \
+--bootstrap-server localhost:9092 \
+--replication-factor 1 \
+--partitions 1 \
+--topic streams-plaintext-input
+```
+
+```bash
+> bin/kafka-topics.sh --create \
+--bootstrap-server localhost:9092 \
+--replication-factor 1 \
+--partitions 1 \
+--topic streams-plaintext-output \
+--config cleanup.policy=compact
+```
+
+Note: we create the output topic with compaction enabled because the output stream is a changelog stream.
+
+You can inspect the newly created topics as follows:
+```bash
+$ bin/kafka-topics.sh --bootstrap-server localhost:9092 --describe
+```
+
+and should see both topics listed, with the expected partition counts and replication factors, and the assigned brokers:
+
+```bash
+Topic:streams-wordcount-output PartitionCount:1 ReplicationFactor:1 Configs:cleanup.policy=compact,segment.bytes=1073741824
+	Topic: streams-wordcount-output Partition: 0 Leader: 0 Replicas: 0 Isr: 0
+Topic:streams-plaintext-input PartitionCount:1 ReplicationFactor:1 Configs:segment.bytes=1073741824
+	Topic: streams-plaintext-input Partition: 0 Leader: 0 Replicas: 0 Isr: 0
+```
+
+Finally, we will need a console producer to be able to write some data to the input topic,
+
+```bash
+$ bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic streams-plaintext-input
+```
+
+and a console consumer, subscribed to the output topic, to be able to inspect our application output:
+
+```bash
+$ bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
+--topic streams-wordcount-output \
+--from-beginning \
+--formatter kafka.tools.DefaultMessageFormatter \
+--property print.key=true \
+--property print.value=true \
+--property key.deserializer=org.apache.kafka.common.serialization.StringDeserializer \
+--property value.deserializer=org.apache.kafka.common.serialization.LongDeserializer
+```
+
+### 3. Piping data
+
+#### 3.1 Configuring the application
+
+We're now ready to start using Kafka Streams! In this part of the tutorial, we will start with piping some data from the input topic to the output topic.
+
+Navigate to `myapps/Pipe.java`:
 
 ```java
 package myapps;
 
 public class Pipe {
 
-	public static void main(String[] args) throws Exception {
+  public static void main(String[] args) throws Exception {
 
-	}
+  }
 }
 ```
 
@@ -42,7 +114,7 @@ props.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass
 props.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass());
 ```
 
-#### 2.2 Defining the topology
+#### 3.2 Defining the topology
 
 Next we will define the computational logic of our Streams application. In Kafka Streams this computational logic is defined as a `topology` of connected processor nodes. We can use a topology builder to construct such a topology,
 
@@ -91,18 +163,18 @@ it will output the following information:
 
 ```bash
 Sub-topologies:
-	Sub-topology: 0
-		Source: KSTREAM-SOURCE-0000000000(topics: streams-plaintext-input) --> KSTREAM-SINK-0000000001
-		Sink: KSTREAM-SINK-0000000001(topic: streams-pipe-output) <-- KSTREAM-SOURCE-0000000000
+  Sub-topology: 0
+    Source: KSTREAM-SOURCE-0000000000(topics: streams-plaintext-input) --> KSTREAM-SINK-0000000001
+    Sink: KSTREAM-SINK-0000000001(topic: streams-pipe-output) <-- KSTREAM-SOURCE-0000000000
 Global Stores:
-	none
+  none
 ```
 
 As shown above, it illustrates that the constructed topology has two processor nodes, a source node `KSTREAM-SOURCE-0000000000` and a sink node `KSTREAM-SINK-0000000001`. `KSTREAM-SOURCE-0000000000` continuously read records from Kafka topic `streams-plaintext-input` and pipe them to its downstream node `KSTREAM-SINK-0000000001`; `KSTREAM-SINK-0000000001` will write each of its received record in order to another Kafka topic `streams-pipe-output` (the `-->` and `<--` arrows dictates the downstream and upstream processor nodes of this node, i.e. "children" and "parents" within the topology graph). It also illustrates that this simple topology has no global state stores associated with it (we will talk about state stores more in the following sections).
 
 Note that we can always describe the topology as we did above at any given point while we are building it in the code, so as a user you can interactively "try and taste" your computational logic defined in the topology until you are happy with it.
 
-#### 2.3 Constructing the Streams client
+#### 3.3 Constructing the Streams client
 
 Suppose we are already done with this simple topology that just pipes data from one Kafka topic to another in an endless streaming manner, we can now construct the Streams client with the two components we have just constructed above: the configuration map specified in a `java.util.Properties` instance and the `Topology` object.
 
@@ -116,19 +188,19 @@ By calling its `start()` function we can trigger the execution of this client. T
 final CountDownLatch latch = new CountDownLatch(1);  
   
 // attach shutdown handler to catch control-c  
-Runtime.getRuntime().addShutdownHook(new Thread("streams-shutdown-hook") {  
-    @Override  
+Runtime.getRuntime().addShutdownHook(new Thread("streams-shutdown-hook") {
+  @Override  
   public void run() {  
-        streams.close();  
-  latch.countDown();  
+    streams.close();  
+    latch.countDown();  
   }  
 });  
   
 try {  
-    streams.start();  
+  streams.start();  
   latch.await();  
 } catch (Throwable e) {  
-    System.exit(1);  
+  System.exit(1);  
 }  
 System.exit(0);
 ```
@@ -150,19 +222,19 @@ import java.util.concurrent.CountDownLatch;
 public class Pipe {  
   
   public static void main(String[] args) throws Exception {  
-        Properties props = new Properties();  
+  Properties props = new Properties();  
   props.put(StreamsConfig.APPLICATION_ID_CONFIG, "streams-pipe");  
   props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");  
   props.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass());  
   props.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass());  
   
- final StreamsBuilder builder = new StreamsBuilder();  
+  final StreamsBuilder builder = new StreamsBuilder();  
   
- builder.stream("streams-plaintext-input").to("streams-pipe-output");  
+  builder.stream("streams-plaintext-input").to("streams-pipe-output");  
   
- final Topology topology = builder.build();  
- final KafkaStreams streams = new KafkaStreams(topology, props);  
- final CountDownLatch latch = new CountDownLatch(1);  
+  final Topology topology = builder.build();  
+  final KafkaStreams streams = new KafkaStreams(topology, props);  
+  final CountDownLatch latch = new CountDownLatch(1);  
   
   // attach shutdown handler to catch control-c  
   Runtime.getRuntime().addShutdownHook(new Thread("streams-shutdown-hook") {  
@@ -173,95 +245,29 @@ public class Pipe {
 	}  
   });  
   
-	try {
-	  streams.start();
-	  latch.await();  
-	} catch (Throwable e) {
-	  System.exit(1);  
-	}
-	System.exit(0);  
+  try {
+    streams.start();
+    latch.await();  
+  } catch (Throwable e) {
+    System.exit(1);  
+  }
+  System.exit(0);  
   }
 }
 ```
 
-#### 2.5 Setting up Kafka
-
-Before we can run our application, we need to have a Kafka broker running, and our input and output topics set up.
-
-Navigate to the Kafka source on your computer and run a Zookeeper and a Kafka server:
-
-```bash
-$ bin/zookeeper-server-start.sh config/zookeeper.properties
-$ bin/kafka-server-start.sh config/server.properties
-```
-
-Next, create the input and the output topics:
-```bash
-> bin/kafka-topics.sh --create \
---bootstrap-server localhost:9092 \
---replication-factor 1 \
---partitions 1 \
---topic streams-plaintext-input
-```
-
-```bash
-> bin/kafka-topics.sh --create \
---bootstrap-server localhost:9092 \
---replication-factor 1 \
---partitions 1 \
---topic streams-plaintext-output \
---config cleanup.policy=compact
-```
-
-Note: we create the output topic with compaction enabled because the output stream is a changelog stream.
-
-You can inspect the newly created topics as follows:
-```bash
-bin/kafka-topics.sh --bootstrap-server localhost:9092 --describe
-```
-
-and should see both topics listed, with the expected partition counts and replication factors, and the assigned brokers:
-
-```bash
-Topic:streams-wordcount-output PartitionCount:1 ReplicationFactor:1 Configs:cleanup.policy=compact,segment.bytes=1073741824
-	Topic: streams-wordcount-output Partition: 0 Leader: 0 Replicas: 0 Isr: 0
-Topic:streams-plaintext-input PartitionCount:1 ReplicationFactor:1 Configs:segment.bytes=1073741824
-	Topic: streams-plaintext-input Partition: 0 Leader: 0 Replicas: 0 Isr: 0
-```
-
-#### 2.6 Starting the application
+#### 3.4 Starting the application
 
 You should now be able to run your application code in the IDE or on the command line, using Maven:
 
 ```bash
-mvn clean package
-mvn exec:java -Dexec.mainClass=myapps.Pipe
+$ mvn clean package
+$ mvn exec:java -Dexec.mainClass=myapps.Pipe
 ```
 
 The application will read from the input topic `streams-plaintext-input` and continuously write to the output topic `streams-plaintext-output`. 
 
-#### 2.7 Starting the console producer and consumer
-
-To be able to see our application in action, we can start the console producer in a separate terminal to write some input data to this topic:
-
-```bash
-bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic streams-plaintext-input
-```
-
-and inspect the output of the WordCount demo application by reading from its output topic with the console consumer in a separate terminal:
-
-```bash
-> bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
---topic streams-wordcount-output \
---from-beginning \
---formatter kafka.tools.DefaultMessageFormatter \
---property print.key=true \
---property print.value=true \
---property key.deserializer=org.apache.kafka.common.serialization.StringDeserializer \
---property value.deserializer=org.apache.kafka.common.serialization.LongDeserializer
-```
-
-Now let's write some message with the console producer into the input topic `streams-plaintext-input` by entering a single line of text and then hit <RETURN>. This will send a new message to the input topic, where the message key is null and the message value is the string encoded text line that you just entered (in practice, input data for applications will typically be streaming continuously into Kafka, rather than being manually entered as we do in this demo):
+Let's write some message with the console producer into the input topic `streams-plaintext-input` by entering a single line of text and then hit <RETURN>. This will send a new message to the input topic, where the message key is null and the message value is the string encoded text line that you just entered (in practice, input data for applications will typically be streaming continuously into Kafka, rather than being manually entered as we do in this demo):
 
 ```bash
 all streams lead to kafka
