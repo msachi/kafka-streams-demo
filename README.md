@@ -1,6 +1,8 @@
 ## Build a demo app with Kafka Streams
 
-In the following tutorial, you will write a stream processing application using Kafka Streams and then run it in your terminal with a simple Kafka producer and consumer. The application you will be building implements the WordCount algorithm, which computes a word occurrence histogram from the input text. It has the ability to operate on an infinite, unbounded stream of data.
+In this tutorial, we will write a stream processing application using Kafka Streams and then run it in your terminal with a simple Kafka producer and consumer.
+
+The application we will be building implements the WordCount algorithm, which computes a word occurrence histogram from the input text. It has the ability to operate on an infinite, unbounded stream of data.
 
 This tutorial is more or less a prettified version of the official Kafka Streams offerings found [here](https://kafka.apache.org/25/documentation/streams/quickstart) and [here](https://kafka.apache.org/25/documentation/streams/tutorial).
 
@@ -14,7 +16,7 @@ Then clone this repo and import the project in your favourite IDE.
 
 The `pom.xml` file included in the project already has the Streams dependency defined. Note that the generated `pom.xml` targets Java 8 and does not work with higher Java versions.
 
-#### 2 Setting up Kafka
+### 2 Setting up Kafka
 
 Before we start writing our application, let's set up all things Kafka.
 
@@ -25,7 +27,7 @@ $ bin/zookeeper-server-start.sh config/zookeeper.properties
 $ bin/kafka-server-start.sh config/server.properties
 ```
 
-Next, let's create the input and the output topics that we will read from and write to:
+Next, let's create the input topic that we will read from:
 ```bash
 $ bin/kafka-topics.sh --create \
 --bootstrap-server localhost:9092 \
@@ -34,12 +36,31 @@ $ bin/kafka-topics.sh --create \
 --topic streams-plaintext-input
 ```
 
+and a few output topics that we will write to:
 ```bash
 > bin/kafka-topics.sh --create \
 --bootstrap-server localhost:9092 \
 --replication-factor 1 \
 --partitions 1 \
---topic streams-plaintext-output \
+--topic streams-pipe-output \
+--config cleanup.policy=compact
+```
+
+```bash
+> bin/kafka-topics.sh --create \
+--bootstrap-server localhost:9092 \
+--replication-factor 1 \
+--partitions 1 \
+--topic streams-linesplit-output \
+--config cleanup.policy=compact
+```
+
+```bash
+> bin/kafka-topics.sh --create \
+--bootstrap-server localhost:9092 \
+--replication-factor 1 \
+--partitions 1 \
+--topic streams-wordcount-output \
 --config cleanup.policy=compact
 ```
 
@@ -50,33 +71,26 @@ You can inspect the newly created topics as follows:
 $ bin/kafka-topics.sh --bootstrap-server localhost:9092 --describe
 ```
 
-and should see both topics listed, with the expected partition counts and replication factors, and the assigned brokers:
+and should see all topics listed, with the expected partition counts and replication factors, and the assigned brokers:
 
 ```bash
-Topic:streams-wordcount-output PartitionCount:1 ReplicationFactor:1 Configs:cleanup.policy=compact,segment.bytes=1073741824
-	Topic: streams-wordcount-output Partition: 0 Leader: 0 Replicas: 0 Isr: 0
+Topic:streams-linesplit-output PartitionCount:1 ReplicationFactor:1 Configs:cleanup.policy=compact,segment.bytes=1073741824
+	Topic: streams-linesplit-output Partition: 0 Leader: 0 Replicas: 0 Isr: 0
+Topic:streams-pipe-output PartitionCount:1 ReplicationFactor:1 Configs:cleanup.policy=compact,segment.bytes=1073741824
+	Topic: streams-pipe-output Partition: 0 Leader: 0 Replicas: 0 Isr: 0
 Topic:streams-plaintext-input PartitionCount:1 ReplicationFactor:1 Configs:segment.bytes=1073741824
 	Topic: streams-plaintext-input Partition: 0 Leader: 0 Replicas: 0 Isr: 0
+Topic:streams-wordcount-output PartitionCount:1 ReplicationFactor:1 Configs:cleanup.policy=compact,segment.bytes=1073741824
+	Topic: streams-wordcount-output Partition: 0 Leader: 0 Replicas: 0 Isr: 0
 ```
 
-Finally, we will need a console producer to be able to write some data to the input topic,
+Finally, we will need a console producer to be able to write some data to the input topic:
 
 ```bash
 $ bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic streams-plaintext-input
 ```
 
-and a console consumer, subscribed to the output topic, to be able to inspect our application output:
-
-```bash
-$ bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
---topic streams-wordcount-output \
---from-beginning \
---formatter kafka.tools.DefaultMessageFormatter \
---property print.key=true \
---property print.value=true \
---property key.deserializer=org.apache.kafka.common.serialization.StringDeserializer \
---property value.deserializer=org.apache.kafka.common.serialization.LongDeserializer
-```
+We will set up the console producers as we progress through the tutorial.
 
 ### 3. Piping data
 
@@ -265,18 +279,31 @@ $ mvn clean package
 $ mvn exec:java -Dexec.mainClass=myapps.Pipe
 ```
 
-The application will read from the input topic `streams-plaintext-input` and continuously write to the output topic `streams-plaintext-output`. 
+The application will read from the input topic `streams-plaintext-input` and continuously write to the output topic `streams-pipe-output`.
 
-Let's write some message with the console producer into the input topic `streams-plaintext-input` by entering a single line of text and then hit <RETURN>. This will send a new message to the input topic, where the message key is null and the message value is the string encoded text line that you just entered (in practice, input data for applications will typically be streaming continuously into Kafka, rather than being manually entered as we do in this demo):
+We already have a console producer set up that we can use to write some data to the input topic. Let's also set up a console consumer, subscribed to the output topic `streams-pipe-output`, to be able to inspect our application output:
+
+```bash
+$ bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
+--topic streams-pipe-output \
+--from-beginning \
+--formatter kafka.tools.DefaultMessageFormatter \
+--property print.key=true \
+--property print.value=true \
+--property key.deserializer=org.apache.kafka.common.serialization.StringDeserializer \
+--property value.deserializer=org.apache.kafka.common.serialization.LongDeserializer
+```
+
+Let's write a messages with the console producer into the input topic `streams-plaintext-input` by entering a single line of text and then hit <RETURN>. This will send a new message to the input topic, where the message key is null and the message value is the string encoded text line that you just entered (in practice, input data for applications will typically be streaming continuously into Kafka, rather than being manually entered as we do in this demo):
 
 ```bash
 all streams lead to kafka
 ```
 
-This message will be processed by the application and the same data will be written to the `streams-plaintext-output` topic and printed by the console consumer:
+This message will be piped by the application and the same data will be written to the `streams-pipe-output` topic and printed by the console consumer:
 
 ```bash
 all streams lead to kafka
 ```
 
-That's cool but not very exciting in terms of data processing -- let's move on to the next step to actually start implementing the WordCount algorithm.
+That's great, our application is reading from a topic, piping the data and writing to another topic. But we're not doing anything exciting yet in terms of data processing - let's move on to the next step to actually start implementing the WordCount algorithm.
