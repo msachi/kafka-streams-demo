@@ -296,13 +296,13 @@ $ bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
 
 Let's write a message with the console producer into the input topic `streams-plaintext-input` by entering a single line of text and then hit <RETURN>. This will send a new message to the input topic, where the message key is null and the message value is the string encoded text line that you just entered (in practice, input data for applications will typically be streaming continuously into Kafka, rather than being manually entered as we do in this demo):
 
-```bash
+```
 I am free and that is why I am lost
 ```
 
 This message will be piped by the application and the same data will be written to the `streams-pipe-output` topic and printed by the console consumer:
 
-```bash
+```
 I am free and that is why I am lost
 ```
 
@@ -426,13 +426,13 @@ $ bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
 
 Let's write a message with the console producer into the input topic `streams-plaintext-input`:
 
-```bash
+```
 I am a cage, in search of a bird
 ```
 
 This message will be processed by the application and the word stream will be written to the `streams-linesplit-output` topic and printed by the console consumer:
 
-```bash
+```
 I
 am
 a
@@ -590,13 +590,13 @@ $ bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
 
 Let's write a message with the console producer into the input topic `streams-plaintext-input`:
 
-```bash
+```
 There is an infinite amount of hope in the universe ... but not for us
 ```
 
 This message will be processed by the application and the word count stream will be written to the `streams-wordcount-output` topic and printed by the console consumer:
 
-```bash
+```
 there       1
 is          1
 an          1
