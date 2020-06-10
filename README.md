@@ -427,21 +427,26 @@ $ bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
 Let's write a message with the console producer into the input topic `streams-plaintext-input`:
 
 ```
-I am a cage, in search of a bird
+There is an infinite amount of hope in the universe ... but not for us
 ```
 
 This message will be processed by the application and the word stream will be written to the `streams-linesplit-output` topic and printed by the console consumer:
 
 ```
-I
-am
-a
-cage
-in
-search
+there
+is
+an
+infinite
+amount
 of
-a
-bird
+hope
+in
+the
+universe
+but
+not
+for
+us
 ```
 
 ### 5. Counting the words
@@ -591,27 +596,86 @@ $ bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
 Let's write a message with the console producer into the input topic `streams-plaintext-input`:
 
 ```
-There is an infinite amount of hope in the universe ... but not for us
+A book is a narcotic
 ```
 
 This message will be processed by the application and the word count stream will be written to the `streams-wordcount-output` topic and printed by the console consumer:
 
 ```
-there       1
+a           1
+book        1
 is          1
-an          1
-infinite    1
-amount      1
-of          1
-hope        1
-in          1
-the         1
-universe    1
-but         1
-not         1
-for         1
-us          1
+a           2
+narcotic    1
 ```
+
+Here, the first column is the Kafka message key in `java.lang.String` format and represents a word that is being counted, and the second column is the message value in `java.lang.Longformat`, representing the word's latest count.
+
+Notice that the word `a` first appears with a count of 1, and is later on updated to the count of 2.
+
+Let's enter another text line:
+
+```
+A book must be the axe for the frozen sea within us
+```
+
+and we should see the following output printed below the previous lines:
+
+```
+a       3
+book    2
+must    1
+be      1
+the     1
+axe     1
+for     1
+the     1
+frozen  1
+sea     1
+within  1
+us      1
+```
+
+Notice that the words `a` and `book` have been incremented from 2 to 3, and from 1 to 2, respectively. The rest of the new words have also been printed with the word count of 1, but the words from previous lines have not been printed again.
+
+With another line:
+```
+Many a book is like a key to unknown chambers within the castle of one’s own self
+```
+
+the output would be:
+
+```
+many        1
+a           4
+book        3
+is          1
+like        1
+a           5
+key         1
+to          1
+unknown     1
+chambers    1
+within      1
+the         2
+castle      1
+of          1
+one's       1
+own         1
+self        1
+```
+
+As one can see, the output of the word count application is actually a continuous stream of updates, where each output record (i.e. each line in the original output above) is an updated count of a single word, aka record key such as "book". For multiple records with the same key, each later record is an update of the previous one.
+
+#### 5.3 Reflecting on stream processing
+
+The diagram below illustrates what is essentially happening behind the scenes. The first column shows the word stream `KStream<String, String>` that results from the incoming stream of text lines. The second column shows the evolution of the current state of the `KTable<String, Long>` that is counting word occurrences for count. The second column shows the change records that result from state updates to the `KTable` and that are being sent to the output Kafka topic `streams-wordcount-output`.
+
+As the first few words are being processed, the `KTable` is being built up as each new word results in a new table entry (highlighted with a green background), and a corresponding change record is sent to the downstream `KStream`.
+
+Then, when words start repeating, existing entries in the KTable start being updated. And again, change records are being sent to the output topic.
+
+Looking beyond the scope of this concrete example, what Kafka Streams is doing here is to leverage the duality between a table and a changelog stream (here: table = the `KTable`, changelog stream = the downstream `KStream`): you can publish every change of the table to a stream, and if you consume the entire changelog stream from beginning to end, you can reconstruct the contents of the table.
 
 ### 6. Tearing down the application
 
