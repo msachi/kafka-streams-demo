@@ -1,12 +1,23 @@
-## Build a demo app with Kafka Streams
+# Build a demo app with Kafka Streams
 
-In this tutorial, we will write a stream processing application using Kafka Streams and then run it with a simple Kafka producer and consumer.
+In the following tutorial, we will write a stream processing application using Kafka Streams and then run it with a simple Kafka producer and consumer.
 
-The application we will be building implements a word count algorithm, which computes a word occurrence histogram from the input text. It has the ability to operate on an infinite, unbounded stream of data.
+> This tutorial is more or less a prettified version of the official Kafka Streams offerings found [here](https://kafka.apache.org/25/documentation/streams/quickstart) and [here](https://kafka.apache.org/25/documentation/streams/tutorial).
 
-This tutorial is more or less a prettified version of the official Kafka Streams offerings found [here](https://kafka.apache.org/25/documentation/streams/quickstart) and [here](https://kafka.apache.org/25/documentation/streams/tutorial).
+The application we will be building implements a word count algorithm, which computes a word occurrence histogram from the input text. It can operate on an infinite, unbounded stream of data.
 
-### 1. Setting up the project
+We will go through it step by step in the following sections:
+
+[1. Setting up the project](#1-setting-up-the-project)  
+[2. Setting up Kafka](#2-setting-up-kafka)  
+[3. Piping data](#3-piping-data)  
+[4. Splitting lines into words](#4-splitting-lines-into-words)  
+[5. Counting words](#5-counting-words)  
+[6. Tearing down the application](#6-tearing-down-the-application)  
+
+Each section relies on the previous ones so don't be tempted to skip any of them!
+
+## 1. Setting up the project
 
 First, make sure that you have:
 - JDK 8 and Apache Maven 3.6 installed on your machine (check using $ java –version and $ mvn –version)
@@ -16,7 +27,7 @@ Then clone this repo and import the project in your favourite IDE.
 
 The `pom.xml` file included in the project already has the Streams dependency defined. Note that the generated `pom.xml` targets Java 8 and does not work with higher Java versions.
 
-### 2 Setting up Kafka
+## 2 Setting up Kafka
 
 Before we start writing our application, let's set up all things Kafka.
 
@@ -64,14 +75,14 @@ and a few output topics that we will write to:
 --config cleanup.policy=compact
 ```
 
-Note: we create the output topic with compaction enabled because the output stream is a changelog stream.
+Note that we have created the output topic with log compaction enabled. This will retain only the last known value for each record key and will delete the old duplicates - we will explain why in [section 5.3](#53-reflecting-on-stream-processing).
 
-You can inspect the newly created topics as follows:
+We can inspect the newly created topics as follows:
 ```bash
 $ bin/kafka-topics.sh --bootstrap-server localhost:9092 --describe
 ```
 
-and should see all topics listed, with the expected partition counts and replication factors, and the assigned brokers:
+and should see all four topics listed, with the expected partition counts and replication factors, and the assigned brokers:
 
 ```bash
 Topic:streams-linesplit-output PartitionCount:1 ReplicationFactor:1 Configs:cleanup.policy=compact,segment.bytes=1073741824
@@ -92,13 +103,11 @@ $ bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic stream
 
 We will set up the console producers as we progress through the tutorial.
 
-### 3. Piping data
-
-#### 3.1 Configuring the application
+## 3. Piping data
 
 We're now ready to start using Kafka Streams! In this part of the tutorial, we will start with piping some data from the input topic to the output topic.
 
-Navigate to `myapps/Pipe.java`:
+Let's navigate to `myapps/Pipe.java`:
 
 ```java
 package myapps;
@@ -113,7 +122,9 @@ public class Pipe {
 
 We are going to fill in the `main` function to write this pipe program. Your IDE should be able to add the import statements automatically.
 
-The first step to write a Streams application is to create a `java.util.Properties` map to specify different Streams execution configuration values as defined in `StreamsConfig`. A couple of important configuration values you need to set are: `StreamsConfig.BOOTSTRAP_SERVERS_CONFIG`, which specifies a list of host/port pairs to use for establishing the initial connection to the Kafka cluster, and `StreamsConfig.APPLICATION_ID_CONFIG`, which gives the unique identifier of your Streams application to distinguish itself with other applications talking to the same Kafka cluster:
+### 3.1 Configuring the application
+
+The first step to write a Streams application is to create a `java.util.Properties` map to specify different Streams execution configuration values as defined in `StreamsConfig`. A couple of important configuration values we need to set are: `StreamsConfig.BOOTSTRAP_SERVERS_CONFIG`, which specifies a list of host/port pairs to use for establishing the initial connection to the Kafka cluster, and `StreamsConfig.APPLICATION_ID_CONFIG`, which gives the unique identifier of your Streams application to distinguish itself with other applications talking to the same Kafka cluster:
 
 ```java
 Properties props = new Properties();  
@@ -121,14 +132,14 @@ props.put(StreamsConfig.APPLICATION_ID_CONFIG, "streams-pipe");
 props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
 ```
 
-In addition, you can customise other configurations in the same map, for example, default serialisation and deserialisation libraries for the record key-value pairs:
+In addition, we can customise other configurations in the same map, for example, default serialisation and deserialisation libraries for the record key-value pairs:
 
 ```java
 props.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass());  
 props.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass());
 ```
 
-#### 3.2 Defining the topology
+### 3.2 Defining the topology
 
 Next we will define the computational logic of our Streams application. In Kafka Streams this computational logic is defined as a `topology` of connected processor nodes. We can use a topology builder to construct such a topology,
 
@@ -136,13 +147,13 @@ Next we will define the computational logic of our Streams application. In Kafka
 final StreamsBuilder builder = new StreamsBuilder();
 ```
 
-And then create a source stream from a Kafka topic named `streams-plaintext-input` using this topology builder:
+and then create a source stream from a Kafka topic named `streams-plaintext-input` using this topology builder:
 
 ```java
 KStream<String, String> source = builder.stream("streams-plaintext-input");
 ```
 
-Now we get a `KStream` that is continuously generating records from its source Kafka topic `streams-plaintext-input`. The records are organized as `String` typed key-value pairs. The simplest thing we can do with this stream is to write it into another Kafka topic, say it's named `streams-pipe-output`:
+Now we get a `KStream` that is continuously generating records from its source Kafka topic `streams-plaintext-input`. The records are organized as `String` typed key-value pairs. The simplest thing we can do with this stream is to write it into another Kafka topic, `streams-pipe-output`:
 
 ```java
 source.to("streams-pipe-output");
@@ -157,7 +168,7 @@ builder.stream("streams-plaintext-input").to("streams-pipe-output");
 We can inspect what kind of `topology` is created from this builder by doing the following:
 
 ```java
-final  Topology topology = builder.build();
+final Topology topology = builder.build();
 ```
 
 And print its description to standard output as:
@@ -184,11 +195,11 @@ Global Stores:
   none
 ```
 
-As shown above, it illustrates that the constructed topology has two processor nodes, a source node `KSTREAM-SOURCE-0000000000` and a sink node `KSTREAM-SINK-0000000001`. `KSTREAM-SOURCE-0000000000` continuously read records from Kafka topic `streams-plaintext-input` and pipe them to its downstream node `KSTREAM-SINK-0000000001`; `KSTREAM-SINK-0000000001` will write each of its received record in order to another Kafka topic `streams-pipe-output` (the `-->` and `<--` arrows dictates the downstream and upstream processor nodes of this node, i.e. "children" and "parents" within the topology graph). It also illustrates that this simple topology has no global state stores associated with it (we will talk about state stores more in the following sections).
+This illustrates that the constructed topology has two processor nodes, a source node `KSTREAM-SOURCE-0000000000` and a sink node `KSTREAM-SINK-0000000001`. `KSTREAM-SOURCE-0000000000` continuously reads records from Kafka topic `streams-plaintext-input` and pipes them to its downstream node `KSTREAM-SINK-0000000001`; `KSTREAM-SINK-0000000001` will write each of its received record in order to another Kafka topic `streams-pipe-output` (the `-->` and `<--` arrows dictates the downstream and upstream processor nodes of this node, i.e. "children" and "parents" within the topology graph). It also illustrates that this simple topology has no global state stores associated with it.
 
 Note that we can always describe the topology as we did above at any given point while we are building it in the code, so as a user you can interactively "try and taste" your computational logic defined in the topology until you are happy with it.
 
-#### 3.3 Constructing the Streams client
+### 3.3 Constructing the Streams client
 
 Suppose we are already done with this simple topology that just pipes data from one Kafka topic to another in an endless streaming manner, we can now construct the Streams client with the two components we have just constructed above: the configuration map specified in a `java.util.Properties` instance and the `Topology` object.
 
@@ -270,9 +281,9 @@ public class Pipe {
 }
 ```
 
-#### 3.4 Starting the application
+### 3.4 Starting the application
 
-You should now be able to run your application code in the IDE or on the command line, using Maven:
+We should now be able to run the application code in the IDE or on the command line, using Maven:
 
 ```bash
 $ mvn clean package
@@ -294,7 +305,7 @@ $ bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
 --property value.deserializer=org.apache.kafka.common.serialization.StringDeserializer
 ```
 
-Let's write a message with the console producer into the input topic `streams-plaintext-input` by entering a single line of text and then hit <RETURN>. This will send a new message to the input topic, where the message key is null and the message value is the string encoded text line that you just entered (in practice, input data for applications will typically be streaming continuously into Kafka, rather than being manually entered as we do in this demo):
+Let's write a message with the console producer into the input topic `streams-plaintext-input` by entering a single line of text and then hitting `<RETURN>`. This will send a new message to the input topic, where the message key is null and the message value is the string-encoded text line that we just entered (in practice, input data for applications will typically be streaming continuously into Kafka, rather than being manually entered as we do in this demo):
 
 ```
 I am free and that is why I am lost
@@ -306,9 +317,9 @@ This message will be piped by the application and the same data will be written 
 I am free and that is why I am lost
 ```
 
-That's great, our application is reading from a topic, piping the data and writing to another topic!
+That's great - our application is correctly reading from a Kafka topic, piping the data and writing to another Kafka topic.
 
-### 4. Splitting lines into words
+## 4. Splitting lines into words
 
 Now let's move on to add some real processing logic by augmenting the current topology. We can first create another program by copying the existing `Pipe.java` class:
 
@@ -328,7 +339,7 @@ public class LineSplit {
 }
 ```
 
-#### 4.1 Adding the logic
+### 4.1 Adding the logic
 
 Since each of the source stream's record is a `String` typed key-value pair, let's treat the value string as a text line and split it into words with a `flatMapValues` operator:
 
@@ -337,7 +348,7 @@ KStream<String, String> source = builder.stream("streams-plaintext-input");
 KStream<String, String> words = source.flatMapValues(value -> Arrays.asList(value.split("\\W+")));
 ```
 
-The operator will take the source stream as its input, and generate a new stream named words by processing each record from its source stream in order and breaking its value string into a list of words, and producing each word as a new record to the output words stream. This is a stateless operator that does not need to keep track of any previously received records or processed results.
+The operator will take the source stream as its input, and generate a new stream named `words` by processing each record from its source stream in order. It will break each record's value string into a list of words, and produce each word as a new record to the output words stream. This is a stateless operator that does not need to keep track of any previously received records or processed results.
 
 And finally we can write the word stream back into another Kafka topic, `streams-linesplit-output`:
 
@@ -347,7 +358,7 @@ source.flatMapValues(value -> Arrays.asList(value.split("\\W+")))
       .to("streams-linesplit-output");
 ```
 
-If we now describe this augmented topology as `System.out.println(topology.describe())`, we will get the following:
+If we now describe this augmented topology using `System.out.println(topology.describe())`, we will get the following:
 
 ```brew
 $ mvn clean package
@@ -361,9 +372,9 @@ Sub-topologies:
     none
 ```
 
-As we can see above, a new processor node `KSTREAM-FLATMAPVALUES-0000000001` is injected into the topology between the original source and sink nodes. It takes the source node as its parent and the sink node as its child. In other words, each record fetched by the source node will first traverse to the newly added `KSTREAM-FLATMAPVALUES-0000000001` node to be processed, and one or more new records will be generated as a result. They will continue traverse down to the sink node to be written back to Kafka. Note this processor node is "stateless" as it is not associated with any stores (i.e. (`stores: []`)).
+As we can see above, a new processor node `KSTREAM-FLATMAPVALUES-0000000001` is injected into the topology between the original source and sink nodes. It takes the source node as its parent and the sink node as its child. In other words, each record fetched by the source node will first traverse to the newly added `KSTREAM-FLATMAPVALUES-0000000001` node to be processed, and one or more new records will be generated as a result. They will continue traverse down to the sink node to be written back to Kafka. Note that this processor node is "stateless" as it is not associated with any state store (i.e. (`stores: []`)).
 
-The complete code looks like this (assuming lambda expression is used):
+Our complete code should now look like this:
 
 ```java
 package myapps;
@@ -402,7 +413,7 @@ public class LineSplit {
 }
 ```
 
-#### 4.2 Running the application
+### 4.2 Running the application
 
 As before, we can run the application code in the IDE or on the command line, using Maven:
 
@@ -449,9 +460,11 @@ for
 us
 ```
 
-### 5. Counting the words
+So far so good!
 
-Let's now take a step further to add some "stateful" computations to the topology by counting the occurrence of the words split from the source text stream. Following similar steps let's create another program based on the `LineSplit.java` class:
+## 5. Counting words
+
+Let's now take a step further to add some "stateful" computations to the topology by counting the occurrence of the words split from the source text stream. Following similar steps as before, let's create another program based on the `LineSplit.java` class:
 
 ```java
 public class WordCount {
@@ -464,32 +477,31 @@ public class WordCount {
 }
 ```
 
-#### 5.1 Adding the logic
+### 5.1 Adding the logic
 
-In order to count the words we can first modify the `flatMapValues` operator to treat all of them as lower case:
+In order to count the words, we can first modify the `flatMapValues` operator to treat all of them as lower case:
 
 ```java
 KStream<String, String> words = source.flatMapValues(value -> Arrays.asList(value.toLowerCase(Locale.getDefault()).split("\\W+")));
 ```
 
-In order to do the counting aggregation we have to first specify that we want to key the stream on the value string, i.e. the lower cased word, with a `groupBy` operator. This operator generate a new grouped stream, which can then be aggregated by a `count` operator, which generates a running count on each of the grouped keys:
+In order to do the counting aggregation we have to first specify that we want to key the stream on the value string, i.e. the lower cased word, with the `groupBy` operator. This operator will generate a new grouped stream, which can then be aggregated with the `count` operator, which generates a running count on each of the grouped keys:
 
 ```java
-KTable<String, Long> counts = words.groupBy((key, value) -> value)
-  // Materialize the result into a KeyValueStore named "counts-store".
-  // The Materialized store is always of type <Bytes, byte[]> as this is the format of the inner most store.
+KTable<String, Long> counts = words
+  .groupBy((key, value) -> value)
   .count(Materialized.<String, Long, KeyValueStore<Bytes, byte[]>>as("counts-store"));
 ```
 
-Note that the count operator has a Materialized parameter that specifies that the running count should be stored in a state store named counts-store. This Counts store can be queried in real-time.
+Note that the count operator has a Materialized parameter that specifies that the running count should be stored in a `KeyValueStore` named `counts-store`. This store can be queried in real-time.
 
-We can also write the `counts` KTable's changelog stream back into another Kafka topic, say `streams-wordcount-output`. Because the result is a changelog stream, the output topic `streams-wordcount-output` should be configured with log compaction enabled. Note that this time the value type is no longer `String` but `Long`, so the default serialization classes are not viable for writing it to Kafka anymore. We need to provide overridden serialization methods for `Long` types, otherwise a runtime exception will be thrown:
+Also note that the Materialized store is always of type <Bytes, byte[]> as this is the format of the inner most store.
+
+We can also write the `counts` KTable's changelog stream back into another Kafka topic, say `streams-wordcount-output`. Note that this time the value type is no longer `String` but `Long`, so the default serialization classes are not viable for writing it to Kafka anymore. We need to provide overridden serialization methods for `Long` types, otherwise a runtime exception will be thrown:
 
 ```java
 counts.toStream().to("streams-wordcount-output", Produced.with(Serdes.String(), Serdes.Long()));
 ```
-
-Note that in order to read the changelog stream from topic `streams-wordcount-output`, one needs to set the value deserialization as `org.apache.kafka.common.serialization.LongDeserializer`.
 
 The above code can be simplified as:
 
@@ -502,7 +514,7 @@ source.flatMapValues(value -> Arrays.asList(value.toLowerCase(Locale.getDefault(
   .to("streams-wordcount-output", Produced.with(Serdes.String(), Serdes.Long()));
 ```
 
-If we again describe this augmented topology as `System.out.println(topology.describe())`, we will get the following:
+If we again describe this augmented topology with `System.out.println(topology.describe())`, we will get the following:
 
 ```java
 $ mvn clean package
@@ -523,9 +535,9 @@ Global Stores:
   none
 ```
 
-As we can see above, the topology now contains two disconnected sub-topologies. The first sub-topology's sink node KSTREAM-SINK-0000000004 will write to a repartition topic Counts-repartition, which will be read by the second sub-topology's source node KSTREAM-SOURCE-0000000006. The repartition topic is used to "shuffle" the source stream by its aggregation key, which is in this case the value string. In addition, inside the first sub-topology a stateless KSTREAM-FILTER-0000000005 node is injected between the grouping KSTREAM-KEY-SELECT-0000000002 node and the sink node to filter out any intermediate record whose aggregate key is empty.
+As we can see above, the topology now contains two disconnected sub-topologies. The first sub-topology's sink node `KSTREAM-SINK-0000000004` will write to a repartition topic `Counts-repartition`, which will be read by the second sub-topology's source node `KSTREAM-SOURCE-0000000006`. The repartition topic is used to "shuffle" the source stream by its aggregation key, which is in this case the value string. In addition, inside the first sub-topology a stateless `KSTREAM-FILTER-0000000005` node is injected between the grouping `KSTREAM-KEY-SELECT-0000000002` node and the sink node to filter out any intermediate record whose aggregate key is empty.
 
-In the second sub-topology, the aggregation node `KSTREAM-AGGREGATE-0000000003` is associated with a state store named `Counts` (the name is specified by the user in the `count` operator). Upon receiving each record from its upcoming stream source node, the aggregation processor will first query its associated `Counts` store to get the current count for that key, augment by one, and then write the new count back to the store. Each updated count for the key will also be piped downstream to the `KTABLE-TOSTREAM-0000000007` node, which interpret this update stream as a record stream before further piping to the sink node `KSTREAM-SINK-0000000008` for writing back to Kafka.
+In the second sub-topology, the aggregation node `KSTREAM-AGGREGATE-0000000003` is associated with a state store named `counts-store` (we specified the name in the `count` operator). Upon receiving each record from its upcoming stream source node, the aggregation processor will first query its associated `counts-store` store to get the current count for that key, augment by one, and then write the new count back to the store. Each updated count for the key will also be piped downstream to the `KTABLE-TOSTREAM-0000000007` node, which interpret this update stream as a record stream before further piping to the sink node `KSTREAM-SINK-0000000008` for writing back to Kafka.
 
 For reference, the complete code should look like this:
 
@@ -571,7 +583,7 @@ public class WordCount {
 }
 ```
 
-#### 5.2 Running the application
+### 5.2 Running the application
 
 As before, we can run the application code in the IDE or on the command line, using Maven:
 
@@ -592,6 +604,8 @@ $ bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
 --property key.deserializer=org.apache.kafka.common.serialization.StringDeserializer \
 --property value.deserializer=org.apache.kafka.common.serialization.LongDeserializer
 ```
+
+Note that in order to read the changelog stream from topic `streams-wordcount-output`, we need to set the value deserialization as `org.apache.kafka.common.serialization.LongDeserializer`.
 
 Let's write a message with the console producer into the input topic `streams-plaintext-input`:
 
@@ -665,18 +679,24 @@ own         1
 self        1
 ```
 
-As one can see, the output of the word count application is actually a continuous stream of updates, where each output record (i.e. each line in the original output above) is an updated count of a single word, aka record key such as "book". For multiple records with the same key, each later record is an update of the previous one.
+As we can see, the output of the word count application is actually a continuous stream of updates, where each output record is an updated count of a single word, aka record key such as `book`. For multiple records with the same key, each later record is an update of the previous one.
 
-#### 5.3 Reflecting on stream processing
+(If you want to keep playing with your word count application and need some more inspiring lines of text, see [here](https://en.wikiquote.org/wiki/Franz_Kafka#Quotes) for more quotes by Franz Kafka, the novelist after whom Kafka was named.)
 
-The diagram below illustrates what is essentially happening behind the scenes. The first column shows the word stream `KStream<String, String>` that results from the incoming stream of text lines. The second column shows the evolution of the current state of the `KTable<String, Long>` that is counting word occurrences for count. The second column shows the change records that result from state updates to the `KTable` and that are being sent to the output Kafka topic `streams-wordcount-output`.
+### 5.3 Reflecting on stream processing
+
+The diagram below illustrates what is essentially happening behind the scenes. The first column shows the word stream `KStream<String, String>` that results from the incoming stream of text lines. The second column shows the evolution of the current state of the `KTable<String, Long>` that is counting word occurrences. The second column shows the change records that result from state updates to the `KTable` and that are being sent to the output Kafka topic `streams-wordcount-output`.
 
 As the first few words are being processed, the `KTable` is being built up as each new word results in a new table entry (highlighted with a green background), and a corresponding change record is sent to the downstream `KStream`.
 
 Then, when words start repeating, existing entries in the KTable start being updated. And again, change records are being sent to the output topic.
 
-Looking beyond the scope of this concrete example, what Kafka Streams is doing here is to leverage the duality between a table and a changelog stream (here: table = the `KTable`, changelog stream = the downstream `KStream`): you can publish every change of the table to a stream, and if you consume the entire changelog stream from beginning to end, you can reconstruct the contents of the table.
+Looking beyond the scope of this concrete example, what Kafka Streams is doing here is leveraging the duality between a table and a changelog stream. We can publish every change of the table to a stream, and if we consume the entire changelog stream from beginning to end, we can reconstruct the contents of the table.
 
-### 6. Tearing down the application
+It should now also be clear why used log compaction for the output topic, which meant retaining only the last known value for each record key. Since the output stream is a changelog stream, the most recent updates contain all the information we need to reconstruct the contents of our table. Previous updates are superfluous and can be safely deleted.
 
-You can now stop the console consumer, the console producer, your word count application, the Kafka broker and the ZooKeeper server (in this order) via `Cmd-C` (or `Ctrl-C`).
+## 6. Tearing down the application
+
+We can now stop the console consumer, the console producer, our word count application, the Kafka broker and the ZooKeeper server (in this order) via `Cmd-C` (or `Ctrl-C`).
+
+_That's it! If you liked the tutorial, you can show your love by starring it._
