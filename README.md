@@ -2,11 +2,7 @@
 
 In the following tutorial, we will write a stream processing application using Kafka Streams and then run it with a simple Kafka producer and consumer.
 
-> This tutorial is more or less a prettified version of the official Kafka Streams offerings found [here](https://kafka.apache.org/25/documentation/streams/quickstart) and [here](https://kafka.apache.org/25/documentation/streams/tutorial).
-
-The application we will be building implements a word count algorithm, which computes a word occurrence histogram from the input text. It can operate on an infinite, unbounded stream of data.
-
-We will go through it step by step in the following sections:
+The tutorial consists of the following sections:
 
 [1. Setting up the project](#1-setting-up-the-project)  
 [2. Setting up Kafka](#2-setting-up-kafka)  
@@ -16,6 +12,17 @@ We will go through it step by step in the following sections:
 [6. Tearing down the application](#6-tearing-down-the-application)  
 
 Each section relies on the previous ones so don't be tempted to skip any of them!
+
+> This tutorial is more or less a prettified version of the official Kafka Streams offerings found [here](https://kafka.apache.org/25/documentation/streams/quickstart) and [here](https://kafka.apache.org/25/documentation/streams/tutorial).
+
+#### About our application 
+
+The application we will be building will compute a word occurrence histogram from the input text. Both its input and output destinations will be Kafka topics, and it will be able to operate on an infinite, unbounded stream of data.
+
+Our architecture will look something like this:  
+![ ](assets/architecture.png)
+
+Now let's get started!
 
 ## 1. Setting up the project
 
@@ -29,7 +36,7 @@ The `pom.xml` file included in the project already has the Streams dependency de
 
 ## 2 Setting up Kafka
 
-Before we start writing our application, let's set up all things Kafka.
+Next, we need to set up all things Kafka.
 
 Navigate to the Kafka source on your computer and run a Zookeeper and a Kafka server:
 
@@ -49,7 +56,7 @@ $ bin/kafka-topics.sh --create \
 
 and a few output topics that we will write to:
 ```bash
-> bin/kafka-topics.sh --create \
+$ bin/kafka-topics.sh --create \
 --bootstrap-server localhost:9092 \
 --replication-factor 1 \
 --partitions 1 \
@@ -58,7 +65,7 @@ and a few output topics that we will write to:
 ```
 
 ```bash
-> bin/kafka-topics.sh --create \
+$ bin/kafka-topics.sh --create \
 --bootstrap-server localhost:9092 \
 --replication-factor 1 \
 --partitions 1 \
@@ -67,7 +74,7 @@ and a few output topics that we will write to:
 ```
 
 ```bash
-> bin/kafka-topics.sh --create \
+$ bin/kafka-topics.sh --create \
 --bootstrap-server localhost:9092 \
 --replication-factor 1 \
 --partitions 1 \
@@ -685,15 +692,17 @@ As we can see, the output of the word count application is actually a continuous
 
 ### 5.3 Reflecting on stream processing
 
-The diagram below illustrates what is essentially happening behind the scenes. The first column shows the word stream `KStream<String, String>` that results from the incoming stream of text lines. The second column shows the evolution of the current state of the `KTable<String, Long>` that is counting word occurrences. The second column shows the change records that result from state updates to the `KTable` and that are being sent to the output Kafka topic `streams-wordcount-output`.
+The diagram below illustrates what is happening behind the scenes. The first column shows the word stream `KStream<String, String>` that results from the incoming stream of text lines. The second column shows the evolution of the current state of the `KTable<String, Long>` that is counting word occurrences. The third column shows the stream `KStream<String, Long>` consisting of change records that result from state updates to the `KTable` and that are being sent to the output Kafka topic `streams-wordcount-output`.
+
+![](assets/streams.png)
 
 As the first few words are being processed, the `KTable` is being built up as each new word results in a new table entry (highlighted with a green background), and a corresponding change record is sent to the downstream `KStream`.
 
-Then, when words start repeating, existing entries in the KTable start being updated. And again, change records are being sent to the output topic.
+Then, when words start repeating (such as the word `a`), existing entries in the `KTable` start being updated. And again, change records are being sent to the output topic.
 
 Looking beyond the scope of this concrete example, what Kafka Streams is doing here is leveraging the duality between a table and a changelog stream. We can publish every change of the table to a stream, and if we consume the entire changelog stream from beginning to end, we can reconstruct the contents of the table.
 
-It should now also be clear why used log compaction for the output topic, which meant retaining only the last known value for each record key. Since the output stream is a changelog stream, the most recent updates contain all the information we need to reconstruct the contents of our table. Previous updates are superfluous and can be safely deleted.
+It should now also be clear why we used log compaction for the output topic, which meant retaining only the last known value for each record key. Since the output stream is a changelog stream, the most recent updates contain all the information we need to reconstruct the contents of our table. Previous updates are superfluous and can be safely deleted.
 
 ## 6. Tearing down the application
 
