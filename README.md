@@ -41,7 +41,10 @@ $ bin/zookeeper-server-start.sh config/zookeeper.properties
 $ bin/kafka-server-start.sh config/server.properties
 ```
 
-Next, let's create a few input topics that we will read from (in a new Terminal):
+Next, let's create three input topics that we will read from, one for each stage of the tutorial. We could reuse some of these, but starting from a clean slate each time will make the data easier to read and interpret.
+
+In a new Terminal:
+
 ```bash
 $ bin/kafka-topics.sh --create \
 --bootstrap-server localhost:9092 \
@@ -66,7 +69,8 @@ $ bin/kafka-topics.sh --create \
 --topic streams-wordcount-input
 ```
 
-and a few output topics that we will write to:
+Similarly, we will need three output topics that we can write to:
+
 ```bash
 $ bin/kafka-topics.sh --create \
 --bootstrap-server localhost:9092 \
@@ -139,7 +143,7 @@ public class Pipe {
 
 We are going to fill in the `main` function to write this pipe program. Your IDE should be able to add the import statements automatically, but if not you will find the complete code with all the imports at the end of each section.
 
-The first step to writing a Streams application is to create a `java.util.Properties` map to specify different Streams execution configuration values as defined in `StreamsConfig`. A couple of important configuration values we need to set are: `StreamsConfig.APPLICATION_ID_CONFIG`, which specifies a unique identifier for your Streams application to distinguish it from other applications talking to the same Kafka cluster, and `StreamsConfig.BOOTSTRAP_SERVERS_CONFIG`, which specifies a list of host/port pairs to use for establishing the initial connection to the Kafka cluster:
+The first step to writing a Streams application is to create a `java.util.Properties` map to specify different Streams execution configuration values as defined in `StreamsConfig`. A couple of important configuration values we need to set are: `StreamsConfig.APPLICATION_ID_CONFIG`, which specifies a unique identifier for your Streams application, to distinguish it from other applications talking to the same Kafka cluster, and `StreamsConfig.BOOTSTRAP_SERVERS_CONFIG`, which specifies a list of host/port pairs to use for establishing the initial connection to the Kafka cluster:
 
 ```java
 Properties props = new Properties();  
@@ -375,9 +379,9 @@ Now, since each of the source stream's records is a `String` typed key-value pai
 KStream<String, String> words = source.flatMapValues(value -> Arrays.asList(value.split("\\W+")));
 ```
 
-The operator will take the source stream as its input, and generate a new stream named `words` by processing each record from its source stream in order. It will break each record's value string into a list of words, and produce each word as a new record to the output words stream. This is a stateless operator that does not need to keep track of any previously received records or processed results.
+The operator will take the source stream as its input and process each record in order. It will break each record's value string into a list of words, and produce each word as a new record to the output `words` stream. This is a stateless operator that does not need to keep track of any previously received records or processed results.
 
-And finally we can write the word stream back into another Kafka topic, `streams-linesplit-output`:
+Finally we can write the word stream back into another Kafka topic, `streams-linesplit-output`:
 
 ```java
 KStream<String, String> source = builder.stream("streams-linesplit-input");
@@ -527,7 +531,7 @@ KStream<String, String> words = source
   .flatMapValues(value -> Arrays.asList(value.toLowerCase(Locale.getDefault()).split("\\W+")));
 ```
 
-Next, we need to specify that we want to key the stream on the value string, i.e. the lower cased word, with the `groupBy` operator. This operator will generate a new grouped stream, which can then be aggregated with the `count` operator, which generates a running count on each of the grouped keys:
+Next, we need to specify that we want to key the stream on the value string, i.e. the lower-cased word, with the `groupBy` operator. This operator will generate a new grouped stream that can then be aggregated with the `count` operator, which generates a running count on each of the grouped keys:
 
 ```java
 KTable<String, Long> counts = words
@@ -537,7 +541,7 @@ KTable<String, Long> counts = words
 
 Note that the count operator has a `Materialized` parameter that specifies that the running count should be stored in a `KeyValueStore` named `counts-store`. This store can be queried in real-time. Also note that the `Materialized` store is always of type `<Bytes, byte[]>` as this is the format of the inner most store.
 
-We can also write the `counts` KTable's changelog stream back into another Kafka topic, say `streams-wordcount-output`. Note that this time the value type is no longer `String` but `Long`, so the default serialization classes are not viable for writing it to Kafka anymore. We need to provide overridden serialization methods for `Long` types, otherwise a runtime exception will be thrown:
+We can also write the `counts` KTable's changelog stream back into another Kafka topic, `streams-wordcount-output`. Note that this time the value type is no longer `String` but `Long`, so the default serialization classes are not viable for writing it to Kafka anymore. We need to provide overridden serialization methods for `Long` types, otherwise a runtime exception will be thrown:
 
 ```java
 counts.toStream().to("streams-wordcount-output", Produced.with(Serdes.String(), Serdes.Long()));
@@ -665,7 +669,7 @@ $ bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
 --property value.deserializer=org.apache.kafka.common.serialization.LongDeserializer
 ```
 
-Note that in order to read the changelog stream from topic `streams-wordcount-output`, we need to set the value deserialization as `org.apache.kafka.common.serialization.LongDeserializer`.
+Note that in order to read the changelog stream from topic `streams-wordcount-output`, we need to set the value deserialization to `org.apache.kafka.common.serialization.LongDeserializer`.
 
 Let's write a message with the console producer into the input topic `streams-wordcount-input`:
 
@@ -682,7 +686,7 @@ a           2
 narcotic    1
 ```
 
-Here, the first column is the Kafka message key in `java.lang.String` format and represents a word that is being counted, and the second column is the message value in `java.lang.Longformat`, representing the word's latest count.
+Here, the first column is the Kafka message key in `java.lang.String` format and represents a word that is being counted, and the second column is the message value in `java.lang.Long` format, representing the word's latest count.
 
 Notice that the word `a` appears with the correct count of 2, but only at the point of its second occurrence.
 
@@ -749,7 +753,7 @@ The diagram below illustrates what is happening behind the scenes. The first col
 
 ![](assets/streams.png)
 
-As the first few words are being processed, the `KTable` is being built up as each new word results in a new table entry (highlighted with a green background), and a corresponding change record is sent to the downstream `KStream`. Then, when words start repeating (such as the word `a`), existing entries in the `KTable` start being updated. And again, change records are being sent to the output topic.
+With the first few words, the `KTable` is being built up as each new word results in a new table entry (highlighted with a green background), and a corresponding change record is sent to the downstream `KStream`. Then, when words start repeating (such as the word `a`), existing entries in the `KTable` start being updated. And again, change records are being sent to the output topic.
 
 Looking beyond the scope of this concrete example, what Kafka Streams is doing here is leveraging the duality between a table and a changelog stream. We can publish every change of the table to a stream, and if we consume the entire changelog stream from beginning to end, we can reconstruct the contents of the table.
 
@@ -757,6 +761,6 @@ This also provides a justification for using log compaction for the `streams-wor
 
 ## 6. Tearing down the application
 
-We can now stop the console consumer, the console producer, our word count application, the Kafka broker and the ZooKeeper server (in this order) with `Ctrl-C`.
+We can now stop the console consumer, the console producer, our word count application, the Kafka broker and the Zookeeper server (in this order) with `Ctrl-C`.
 
 _That's it! If you liked the tutorial, you can show your love by starring it._
