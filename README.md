@@ -41,13 +41,29 @@ $ bin/zookeeper-server-start.sh config/zookeeper.properties
 $ bin/kafka-server-start.sh config/server.properties
 ```
 
-Next, let's create the input topic that we will read from (in a new Terminal):
+Next, let's create a few input topics that we will read from (in a new Terminal):
 ```bash
 $ bin/kafka-topics.sh --create \
 --bootstrap-server localhost:9092 \
 --replication-factor 1 \
 --partitions 1 \
---topic streams-plaintext-input
+--topic streams-pipe-input
+```
+
+```bash
+$ bin/kafka-topics.sh --create \
+--bootstrap-server localhost:9092 \
+--replication-factor 1 \
+--partitions 1 \
+--topic streams-linesplit-input
+```
+
+```bash
+$ bin/kafka-topics.sh --create \
+--bootstrap-server localhost:9092 \
+--replication-factor 1 \
+--partitions 1 \
+--topic streams-wordcount-input
 ```
 
 and a few output topics that we will write to:
@@ -83,30 +99,30 @@ We can inspect the newly created topics as follows:
 $ bin/kafka-topics.sh --bootstrap-server localhost:9092 --describe
 ```
 
-And should see all four topics listed, with the expected partition counts and replication factors, and the assigned broker:
+And should see all six topics listed, alongside the `__consumer_offsets` topic that Kafka automatically created for us. Note the partition counts, replication factors, and the assigned brokers:
 
 ```bash
+Topic: streams-linesplit-output	PartitionCount: 1	ReplicationFactor: 1	Configs: segment.bytes=1073741824
+	Topic: streams-linesplit-output	Partition: 0	Leader: 0	Replicas: 0	Isr: 0
+Topic: streams-pipe-input	PartitionCount: 1	ReplicationFactor: 1	Configs: segment.bytes=1073741824
+	Topic: streams-pipe-input	Partition: 0	Leader: 0	Replicas: 0	Isr: 0
 Topic: streams-pipe-output	PartitionCount: 1	ReplicationFactor: 1	Configs: segment.bytes=1073741824
 	Topic: streams-pipe-output	Partition: 0	Leader: 0	Replicas: 0	Isr: 0
-Topic: streams-plaintext-input	PartitionCount: 1	ReplicationFactor: 1	Configs: segment.bytes=1073741824
-	Topic: streams-plaintext-input	Partition: 0	Leader: 0	Replicas: 0	Isr: 0
-Topic: streams-linesplit-output	PartitionCount: 1	ReplicationFactor: 1	Configs: segment.bytes=1073741824
-	Topic: streams-linesplit-outputPartition: 0	Leader: 0	Replicas: 0	Isr: 0
+Topic: streams-linesplit-input	PartitionCount: 1	ReplicationFactor: 1	Configs: segment.bytes=1073741824
+	Topic: streams-linesplit-input	Partition: 0	Leader: 0	Replicas: 0	Isr: 0
 Topic: streams-wordcount-output	PartitionCount: 1	ReplicationFactor: 1	Configs: cleanup.policy=compact,segment.bytes=1073741824
-	Topic: streams-wordcount-outputPartition: 0	Leader: 0	Replicas: 0	Isr: 0
+	Topic: streams-wordcount-output	Partition: 0	Leader: 0	Replicas: 0	Isr: 0
+Topic: streams-wordcount-input	PartitionCount: 1	ReplicationFactor: 1	Configs: segment.bytes=1073741824
+	Topic: streams-wordcount-input	Partition: 0	Leader: 0	Replicas: 0	Isr: 0
 ```
 
-Finally, we will need a console producer to be able to write some data to the input topic:
-
-```bash
-$ bin/kafka-console-producer.sh --broker-list localhost:9092 --topic streams-plaintext-input
-```
-
-We will set up the console consumers as we progress through the tutorial.
+That's it for now - we will set up the console producers and consumers as we progress through the tutorial.
 
 ## 3. Piping data
 
 We're now ready to dive into Kafka Streams! In this part of the tutorial, we will start with piping some data from the input topic to the output topic.
+
+### 3.1 Configuring the application
 
 Let's navigate to `src/main/java/myapps/Pipe.java` in the IDE:
 
@@ -122,8 +138,6 @@ public class Pipe {
 ```
 
 We are going to fill in the `main` function to write this pipe program. Your IDE should be able to add the import statements automatically, but if not you will find the complete code with all the imports at the end of each section.
-
-### 3.1 Configuring the application
 
 The first step to writing a Streams application is to create a `java.util.Properties` map to specify different Streams execution configuration values as defined in `StreamsConfig`. A couple of important configuration values we need to set are: `StreamsConfig.APPLICATION_ID_CONFIG`, which specifies a unique identifier for your Streams application to distinguish it from other applications talking to the same Kafka cluster, and `StreamsConfig.BOOTSTRAP_SERVERS_CONFIG`, which specifies a list of host/port pairs to use for establishing the initial connection to the Kafka cluster:
 
@@ -148,13 +162,13 @@ Next we will define the computational logic of our application. In Kafka Streams
 final StreamsBuilder builder = new StreamsBuilder();
 ```
 
-and then create a source stream from the Kafka topic `streams-plaintext-input` using this topology builder:
+and then create a source stream from the Kafka topic `streams-pipe-input` using this topology builder:
 
 ```java
-KStream<String, String> source = builder.stream("streams-plaintext-input");
+KStream<String, String> source = builder.stream("streams-pipe-input");
 ```
 
-Now we get a `KStream` that is continuously generating records from its source Kafka topic `streams-plaintext-input`. The records are organized as `String` typed key-value pairs. The simplest thing we can do with this stream is to write it into another Kafka topic, `streams-pipe-output`:
+Now we get a `KStream` that is continuously generating records from its source Kafka topic `streams-pipe-input`. The records are organized as `String` typed key-value pairs. The simplest thing we can do with this stream is to write it into another Kafka topic, `streams-pipe-output`:
 
 ```java
 source.to("streams-pipe-output");
@@ -163,7 +177,7 @@ source.to("streams-pipe-output");
 Note that we can also concatenate the above two lines into a single line as:
 
 ```java
-builder.stream("streams-plaintext-input").to("streams-pipe-output");
+builder.stream("streams-pipe-input").to("streams-pipe-output");
 ```
 
 We can inspect what kind of `topology` is created from this builder by doing the following:
@@ -190,13 +204,13 @@ it will output the following information:
 ```bash
 Topologies:
    Sub-topology: 0
-    Source: KSTREAM-SOURCE-0000000000 (topics: [streams-plaintext-input])
+    Source: KSTREAM-SOURCE-0000000000 (topics: [streams-pipe-input])
       --> KSTREAM-SINK-0000000001
     Sink: KSTREAM-SINK-0000000001 (topic: streams-pipe-output)
       <-- KSTREAM-SOURCE-0000000000
 ```
 
-This log illustrates that the constructed topology has two processor nodes, a source node `KSTREAM-SOURCE-0000000000` and a sink node `KSTREAM-SINK-0000000001`. `KSTREAM-SOURCE-0000000000` continuously reads records from Kafka topic `streams-plaintext-input` and pipes them to its downstream node `KSTREAM-SINK-0000000001`; `KSTREAM-SINK-0000000001` will write each of its received record in order to another Kafka topic `streams-pipe-output` (the `-->` and `<--` arrows dictate the downstream and upstream processor nodes of this node, i.e. "children" and "parents" within the topology graph).
+This log illustrates that the constructed topology has two processor nodes, a source node `KSTREAM-SOURCE-0000000000` and a sink node `KSTREAM-SINK-0000000001`. `KSTREAM-SOURCE-0000000000` continuously reads records from Kafka topic `streams-pipe-input` and pipes them to its downstream node `KSTREAM-SINK-0000000001`; `KSTREAM-SINK-0000000001` will write each of its received record in order to another Kafka topic `streams-pipe-output` (the `-->` and `<--` arrows dictate the downstream and upstream processor nodes of this node, i.e. "children" and "parents" within the topology graph).
 
 Note that we can always describe the topology as we did above at any given point while we are building it in the code, so as a user you can interactively probe your computational logic defined in the topology until you are happy with it.
 
@@ -254,7 +268,7 @@ public class Pipe {
 
     final StreamsBuilder builder = new StreamsBuilder();
 
-    builder.stream("streams-plaintext-input").to("streams-pipe-output");
+    builder.stream("streams-pipe-input").to("streams-pipe-output");
 
     final Topology topology = builder.build();
     final KafkaStreams streams = new KafkaStreams(topology, props);
@@ -288,7 +302,13 @@ $ mvn clean package
 $ mvn exec:java -Dexec.mainClass=myapps.Pipe
 ```
 
-We already have a console producer set up that we can use to write some data to the input topic `streams-plaintext-input`. Let's also open up a new Terminal and set up a console consumer, subscribed to the output topic `streams-pipe-output`, to be able to inspect our application output:
+Let's open a new Terminal and set up a console producer, so that we can write some data to the input topic `streams-pipe-input`:
+
+```bash
+$ bin/kafka-console-producer.sh --broker-list localhost:9092 --topic streams-pipe-input
+```
+
+And in another Terminal, set up a console consumer, subscribed to the output topic `streams-pipe-output`, to be able to inspect our application output:
 
 ```bash
 $ bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
@@ -301,7 +321,7 @@ $ bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
 --property value.deserializer=org.apache.kafka.common.serialization.StringDeserializer
 ```
 
-Let's write a message with the console producer into the input topic `streams-plaintext-input` by entering a single line of text and then hitting `<RETURN>`:
+Let's write a message with the console producer into the input topic `streams-pipe-input` by entering a single line of text and then hitting `<RETURN>`:
 
 ```
 I am free and that is why I am lost
@@ -317,11 +337,15 @@ null	I am free and that is why I am lost
 
 That's great - our application is able to read messages from a Kafka topic, pipe them and write them to another Kafka topic!
 
-We can stop the console consumer and the application with `Cmd-C` (or `Ctrl-C`) and move on to the next section.
+We can stop the console consumer, the console producer and the application with `Ctrl-C`, and move on to the next section of the tutorial.
 
 ## 4. Splitting lines into words
 
-Now let's add some real processing logic by augmenting the current topology. We can first create another program by copying the existing `Pipe.java` class:
+Now let's add some real processing logic by augmenting the current topology.
+
+### 4.1 Adding the logic
+
+We can first create another program by copying the existing `Pipe.java` class:
 
 ```bash
 cp src/main/java/myapps/Pipe.java src/main/java/myapps/LineSplit.java
@@ -339,12 +363,15 @@ public class LineSplit {
 }
 ```
 
-### 4.1 Adding the logic
-
-Since each of the source stream's records is a `String` typed key-value pair, let's treat the value string as a text line and split it into words with a `flatMapValues` operator:
+Let's change the input topic to `streams-linesplit-input`:
 
 ```java
-KStream<String, String> source = builder.stream("streams-plaintext-input");
+KStream<String, String> source = builder.stream("streams-linesplit-input");
+```
+
+Now, since each of the source stream's records is a `String` typed key-value pair, let's treat the value string as a text line and split it into words with a `flatMapValues` operator:
+
+```java
 KStream<String, String> words = source.flatMapValues(value -> Arrays.asList(value.split("\\W+")));
 ```
 
@@ -353,7 +380,7 @@ The operator will take the source stream as its input, and generate a new stream
 And finally we can write the word stream back into another Kafka topic, `streams-linesplit-output`:
 
 ```java
-KStream<String, String> source = builder.stream("streams-plaintext-input");
+KStream<String, String> source = builder.stream("streams-linesplit-input");
 source.flatMapValues(value -> Arrays.asList(value.split("\\W+")))
       .to("streams-linesplit-output");
 ```
@@ -366,7 +393,7 @@ $ mvn exec:java -Dexec.mainClass=myapps.LineSplit
 
 Topologies:
    Sub-topology: 0
-    Source: KSTREAM-SOURCE-0000000000 (topics: [streams-plaintext-input])
+    Source: KSTREAM-SOURCE-0000000000 (topics: [streams-linesplit-input])
       --> KSTREAM-FLATMAPVALUES-0000000001
     Processor: KSTREAM-FLATMAPVALUES-0000000001 (stores: [])
       --> KSTREAM-SINK-0000000002
@@ -403,7 +430,7 @@ public class LineSplit {
 
     final StreamsBuilder builder = new StreamsBuilder();
 
-    KStream<String, String> source = builder.stream("streams-plaintext-input");
+    KStream<String, String> source = builder.stream("streams-linesplit-input");
     source.flatMapValues(value -> Arrays.asList(value.split("\\W+")))
           .to("streams-linesplit-output");
 
@@ -424,7 +451,11 @@ $ mvn clean package
 $ mvn exec:java -Dexec.mainClass=myapps.LineSplit
 ```
 
-We will need to set up a new console consumer, subscribed to the output topic `streams-linesplit-output`, in a new Terminal:
+Again, we will need to set up a new producer and a new consumer:
+
+```bash
+$ bin/kafka-console-producer.sh --broker-list localhost:9092 --topic streams-linesplit-input
+```
 
 ```bash
 $ bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
@@ -437,7 +468,7 @@ $ bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
 --property value.deserializer=org.apache.kafka.common.serialization.StringDeserializer
 ```
 
-Let's write a message with the console producer into the input topic `streams-plaintext-input`:
+Let's write a message with the console producer into the input topic `streams-linesplit-input`:
 
 ```
 There is an infinite amount of hope in the universe ... but not for us
@@ -462,11 +493,15 @@ null	for
 null	us
 ```
 
-So far so good! We can stop the console consumer and the application, and move on to the next section.
+So far so good! We can stop the console consumer, the console producer and the application, and move on to the next section.
 
 ## 5. Counting words
 
-Let's now take a step further to add some "stateful" computations to the topology by counting the occurrence of the words split from the source text stream. Following similar steps as before, let's create another program based on the `LineSplit.java` class, named `WordCount.java`:
+Let's now take a step further to add some "stateful" computations to the topology by counting the occurrence of the words split from the source text stream.
+
+### 5.1 Adding the logic
+
+Following similar steps as before, let's create another program based on the `LineSplit.java` class, named `WordCount.java`:
 
 ```java
 public class WordCount {
@@ -479,9 +514,13 @@ public class WordCount {
 }
 ```
 
-### 5.1 Adding the logic
+Let's change the input topic to `streams-wordcount-input`:
 
-In order to count the words, we can first modify the `flatMapValues` operator to treat all of them as lower case:
+```java
+KStream<String, String> source = builder.stream("streams-wordcount-input");
+```
+
+Then, in order to count the words, we can first modify the `flatMapValues` operator to treat all of them as lower case:
 
 ```java
 KStream<String, String> words = source
@@ -507,7 +546,7 @@ counts.toStream().to("streams-wordcount-output", Produced.with(Serdes.String(), 
 The above code can be simplified as:
 
 ```java
-KStream<String, String> source = builder.stream("streams-plaintext-input");
+KStream<String, String> source = builder.stream("streams-wordcount-input");
 source.flatMapValues(value -> Arrays.asList(value.toLowerCase(Locale.getDefault()).split("\\W+")))
   .groupBy((key, value) -> value)
   .count(Materialized.<String, Long, KeyValueStore<Bytes, byte[]>>as("counts-store"))
@@ -523,7 +562,7 @@ $ mvn exec:java -Dexec.mainClass=myapps.WordCount
 
 Topologies:
    Sub-topology: 0
-    Source: KSTREAM-SOURCE-0000000000 (topics: [streams-plaintext-input])
+    Source: KSTREAM-SOURCE-0000000000 (topics: [streams-wordcount-input])
       --> KSTREAM-FLATMAPVALUES-0000000001
     Processor: KSTREAM-FLATMAPVALUES-0000000001 (stores: [])
       --> KSTREAM-KEY-SELECT-0000000002
@@ -584,7 +623,7 @@ public class WordCount {
 
     final StreamsBuilder builder = new StreamsBuilder();
 
-    KStream<String, String> source = builder.stream("streams-plaintext-input");
+    KStream<String, String> source = builder.stream("streams-wordcount-input");
     source.flatMapValues(value -> Arrays.asList(value.toLowerCase().split("\\W+")))
         .groupBy((key, value) -> value)
         .count(Materialized.<String, Long, KeyValueStore<Bytes, byte[]>>as("counts-store"))
@@ -609,7 +648,11 @@ $ mvn clean package
 $ mvn exec:java -Dexec.mainClass=myapps.WordCount
 ```
 
-Again, we need to set up a new console consumer, this time subscribed to the output topic `streams-wordcount-output`, in a new Terminal:
+Again, we need to set up a new producer and a new consumer:
+
+```bash
+$ bin/kafka-console-producer.sh --broker-list localhost:9092 --topic streams-wordcount-input
+```
 
 ```bash
 $ bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
@@ -624,7 +667,7 @@ $ bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
 
 Note that in order to read the changelog stream from topic `streams-wordcount-output`, we need to set the value deserialization as `org.apache.kafka.common.serialization.LongDeserializer`.
 
-Let's write a message with the console producer into the input topic `streams-plaintext-input`:
+Let's write a message with the console producer into the input topic `streams-wordcount-input`:
 
 ```
 A book is a narcotic
@@ -714,6 +757,6 @@ It should now also be clear why we used log compaction for the `streams-wordcoun
 
 ## 6. Tearing down the application
 
-We can now stop the console consumer, the console producer, our word count application, the Kafka broker and the ZooKeeper server (in this order) via `Cmd-C` (or `Ctrl-C`).
+We can now stop the console consumer, the console producer, our word count application, the Kafka broker and the ZooKeeper server (in this order) with `Ctrl-C`.
 
 _That's it! If you liked the tutorial, you can show your love by starring it._
