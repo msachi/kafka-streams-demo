@@ -92,7 +92,7 @@ $ bin/kafka-topics.sh --create \
 --config cleanup.policy=compact
 ```
 
-Note that we created the last output topic with log compaction enabled. We will explain what this does and why it is important in [section 5.3](#53-understanding-stream-processing).
+Note that we created the last output topic with log compaction enabled. We will explain what this does and why it is important in [section 5](#5-counting-words).
 
 We can inspect the newly created topics as follows:
 ```bash
@@ -676,7 +676,6 @@ A book is a narcotic
 This message will be processed by the application and the word count stream will be written to the `streams-wordcount-output` topic and printed by the console consumer:
 
 ```
-a           1
 book        1
 is          1
 a           2
@@ -685,7 +684,7 @@ narcotic    1
 
 Here, the first column is the Kafka message key in `java.lang.String` format and represents a word that is being counted, and the second column is the message value in `java.lang.Longformat`, representing the word's latest count.
 
-Notice that the word `a` first appears with a count of 1, and is later on updated to the count of 2.
+Notice that the word `a` appears with the correct count of 2, but only at the point of its second occurrence.
 
 Let's enter another text line:
 
@@ -700,17 +699,16 @@ a       3
 book    2
 must    1
 be      1
-the     1
 axe     1
 for     1
-the     1
+the     2
 frozen  1
 sea     1
 within  1
 us      1
 ```
 
-Notice that the words `a` and `book` have been incremented from 2 to 3, and from 1 to 2, respectively. The rest of the new words have also been printed with the word count of 1, but the words from previous lines have not been printed again.
+Notice that the word counts for words `a`, `book` and `the` have been incremented. The rest of the words from our new line have also been printed with the word count of 1, but the words from previous lines have not been printed again.
 
 With another line:
 ```
@@ -721,25 +719,27 @@ the output would be:
 
 ```
 many        1
-a           4
 book        3
-is          1
+is          2
 like        1
 a           5
 key         1
 to          1
 unknown     1
 chambers    1
-within      1
-the         2
+within      2
+the         3
 castle      1
 of          1
-one's       1
+one         1
+s           1
 own         1
 self        1
 ```
 
-As we can see, the output of the word count application is actually a continuous stream of updates, where each output record is an updated count of a single word, aka record key such as `book`. For multiple records with the same key, each later record is an update of the previous one.
+As we can see from these three examples, the output of the word count application is actually a continuous stream of updates, where each output record is an updated count of a single word (i.e. record key) such as `book`. For multiple records with the same key, each later record is an update of the previous one.
+
+The reason that each word only appears once in the output is that we enabled log compaction for the `streams-wordcount-output` topic. Log compaction only retains the last known value for each record key and will delete the old duplicates, so it can save some space.
 
 (If you want to keep playing with your word count application and need some more inspiring lines of text, see [here](https://en.wikiquote.org/wiki/Franz_Kafka#Quotes) for more quotes by Franz Kafka, the novelist after whom Kafka was named.)
 
@@ -753,7 +753,7 @@ As the first few words are being processed, the `KTable` is being built up as ea
 
 Looking beyond the scope of this concrete example, what Kafka Streams is doing here is leveraging the duality between a table and a changelog stream. We can publish every change of the table to a stream, and if we consume the entire changelog stream from beginning to end, we can reconstruct the contents of the table.
 
-It should now also be clear why we used log compaction for the `streams-wordcount-output` topic. Log compaction will retain only the last known value for each record key and will delete the old duplicates, so it can save some space. We can use log compaction in this case since the output stream is a changelog stream, and the most recent updates contain all the information we need to reconstruct the contents of our table. Previous record updates are superfluous and can be safely deleted.
+This also provides a justification for using log compaction for the `streams-wordcount-output` topic. Since the output stream is a changelog stream, the most recent updates contain all the information we need to reconstruct the contents of our table. Previous record updates are superfluous and can be safely deleted.
 
 ## 6. Tearing down the application
 
